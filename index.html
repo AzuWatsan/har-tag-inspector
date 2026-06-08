@@ -945,17 +945,77 @@ function detectMicrosoftAds(ctx) {
 }
 
 // Yahoo Ads
-const YAHOO_HOSTS = ["yahoo.co.jp","yimg.jp","yjtag.yahoo.co.jp","b92.yahoo.co.jp"];
+// タグ種別ごとにホスト・パス・パラメータを分けて判定する
+//
+// [YDN コンバージョン]  apm.yahoo.co.jp/c
+//   platformId : yahoo_ydn_conv_io
+//   label      : yahoo_ydn_conv_label
+//
+// [YDN リターゲティング]  b92.yahoo.co.jp / yjtag.yahoo.co.jp
+//   platformId : yahoo_retargeting_id
+//   label      : yahoo_retargeting_label
+//
+// [YSS コンバージョン]  s.yimg.jp 等
+//   platformId : yahoo_conversion_id
+//   label      : yahoo_conversion_label
+
 function detectYahooAds(ctx) {
   const host = ctx.url.hostname;
-  if (!YAHOO_HOSTS.some(h => host.includes(h))) return null;
+  const path = ctx.url.pathname;
   const params = { ...ctx.queryParams, ...ctx.postParams };
-  return makeEvent("Yahoo Ads", {
-    platformId: params["yclid"] || params["ysid"] || params["site_id"] || undefined,
-    eventName: undefined,
-    eventType: "yahoo_tag_request",
-    rawParams: params,
-  }, ctx);
+
+  // YDN コンバージョン (apm.yahoo.co.jp/c)
+  if (host === "apm.yahoo.co.jp" && path === "/c") {
+    const convIo    = params["yahoo_ydn_conv_io"];
+    const convLabel = params["yahoo_ydn_conv_label"];
+    return makeEvent("Yahoo Ads", {
+      platformId: convIo,
+      eventName:  convLabel ? `conv_label:${convLabel}` : "ydn_conversion",
+      eventType:  "conversion",
+      rawParams:  params,
+    }, ctx);
+  }
+
+  // YDN リターゲティング (b92.yahoo.co.jp / yjtag.yahoo.co.jp)
+  if (host.includes("b92.yahoo.co.jp") || host.includes("yjtag.yahoo.co.jp")) {
+    const retId    = params["yahoo_retargeting_id"];
+    const retLabel = params["yahoo_retargeting_label"];
+    const pageType = params["yahoo_retargeting_page_type"];
+    const name     = retLabel
+      ? `retargeting_label:${retLabel}`
+      : pageType
+        ? `retargeting_page:${pageType}`
+        : "ydn_retargeting";
+    return makeEvent("Yahoo Ads", {
+      platformId: retId,
+      eventName:  name,
+      eventType:  "remarketing",
+      rawParams:  params,
+    }, ctx);
+  }
+
+  // YSS コンバージョン (s.yimg.jp 等、yahoo_conversion_id が存在する)
+  if (host.includes("yimg.jp") || host.includes("yahoo.co.jp")) {
+    const convId    = params["yahoo_conversion_id"];
+    const convLabel = params["yahoo_conversion_label"];
+    if (convId) {
+      return makeEvent("Yahoo Ads", {
+        platformId: convId,
+        eventName:  convLabel ? `conv_label:${convLabel}` : "yss_conversion",
+        eventType:  "conversion",
+        rawParams:  params,
+      }, ctx);
+    }
+    // それ以外の yahoo.co.jp / yimg.jp リクエスト（汎用フォールバック）
+    return makeEvent("Yahoo Ads", {
+      platformId: params["yclid"] || params["ysid"] || params["site_id"] || undefined,
+      eventName:  undefined,
+      eventType:  "yahoo_tag_request",
+      rawParams:  params,
+    }, ctx);
+  }
+
+  return null;
 }
 
 // TikTok
